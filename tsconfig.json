@@ -1,12 +1,15 @@
 {
 	"compilerOptions": {
 		"module": "Node16",
+		"moduleResolution": "node16",
 		"target": "ES2022",
 		"lib": [
 			"ES2022"
 		],
 		"sourceMap": true,
-		"rootDir": "src",
+		"rootDir": "./src",
+		"outDir": "./dist",
+		"esModuleInterop": true,
 		"strict": true,   /* enable all strict type-checking options */
 		/* Additional Checks */
 		// "noImplicitReturns": true, /* Report error when not all code paths in function return a value. */
