@@ -101,13 +101,19 @@ export async function authenticate(context: vscode.ExtensionContext) {
 
 }
 
-async function refreshAccessToken(context: vscode.ExtensionContext) {
+export async function refreshAccessToken(
+    context: vscode.ExtensionContext,
+): Promise<string | null | undefined> {
     const refreshToken = await context.secrets.get('githubRefreshToken');
 
     if(!refreshToken) {
-        vscode.window.showErrorMessage("No refresh Token found. Please re authenticate.");
-        return;
+        vscode.window.showErrorMessage("No refresh Token found. Re-authenticating...");
+        await authenticate(context);
+        return null;
     }
+
+    const clientId = process.env.GITHUB_CLIENT_ID!;
+    const clientSecret = process.env.GITHUB_CLIENT_SECRET!;
 
     try {
         const response = await fetch(tokenUrl, {
@@ -128,22 +134,24 @@ async function refreshAccessToken(context: vscode.ExtensionContext) {
 
         if(data.error) {
             vscode.window.showErrorMessage(`Token refresh failed: ${data.error_description}`);
-            return;
+            return null;
         }
 
-        const newAccessToken = data.access_token;
-        const newRefreshToken = data.refresh_token;
-
-        await context.secrets.store('githubAccessToken', newAccessToken);
-        if(newRefreshToken) {
-            await context.secrets.store('githubRefreshToken', newRefreshToken);
+        if(data.access_token) {
+            await context.secrets.store('githubAccessToken', data.access_token);
+            if(data.refresh_token) {
+                await context.secrets.store('githubRefreshToken', data.refresh_token);
+            }
+            vscode.window.showInformationMessage('Token refreshed successfullyl');
+            return data.access_token;
         }
 
-        vscode.window.showInformationMessage("Access token refreshed Successfully.");
     } catch (error) {
         vscode.window.showErrorMessage("Failed to refresh access token.");
         console.error("Token refresh error: ", error);
+        await authenticate(context);
     }
+    return null;
 }
 
 async function makeAuthenticationRequest(context: vscode.ExtensionContext) {
