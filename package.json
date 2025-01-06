@@ -55,6 +55,7 @@
     "@octokit/oauth-app": "^7.1.4",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
+    "octokit": "^4.0.3",
     "open": "^10.1.0"
   }
 }
