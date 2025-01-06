@@ -1,28 +1,53 @@
-// The module 'vscode' contains the VS Code extensibility API
-// Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
-import { authenticate } from './authenticate';
+import { authenticate, refreshAccessToken } from './authenticate';
+import { ensureMirrorRepo, mirrorRepos } from './sync';
 
-// This method is called when your extension is activated
-// Your extension is activated the very first time the command is executed
-export function activate(context: vscode.ExtensionContext) {
+async function ensureValidToken(context: vscode.ExtensionContext) {
+	const token = await context.secrets.get('githubAccessToken');
 
-	// Use the console to output diagnostic information (console.log) and errors (console.error)
-	// This line of code will only be executed once when your extension is activated
-	console.log('Congratulations, your extension "chrono-git" is now active!');
+	if(!token) {
+		vscode.window.showErrorMessage("No Github token found. Please authenticate.");
+		return;
+	}
+	const refreshedToken = await refreshAccessToken(context);
 
-	// The command has been defined in the package.json file
-	// Now provide the implementation of the command with registerCommand
-	// The commandId parameter must match the command field in package.json
-	const disposable = vscode.commands.registerCommand('chrono-git.authenticateGitHub', () => {
-		// The code you place here will be executed every time your command is executed
-		// Display a message box to the user
-		vscode.window.showInformationMessage('Hello World from Chrono Git!!');
-		authenticate(context);
-	});
-
-	context.subscriptions.push(disposable);
+	if(refreshedToken) {
+		console.log("Access token refreshed.");
+	}
 }
 
-// This method is called when your extension is deactivated
+function scheduleBatchSync(context: vscode.ExtensionContext) {
+	const syncInterval = 3 * 60 * 60 * 1000;
+	setInterval(() => {
+		mirrorRepos(context);
+	}, syncInterval);
+}
+
+export function activate(context: vscode.ExtensionContext) {
+
+	console.log('Congratulations, your extension "chrono-git" is now active!');
+	
+	ensureValidToken(context);
+	context.subscriptions.push(
+		vscode.commands.registerCommand('chrono-git.authenticate', () => {
+			authenticate(context);
+		})
+	);
+
+	ensureMirrorRepo(context);
+	scheduleBatchSync(context);
+	context.subscriptions.push(
+		vscode.commands.registerCommand('chrono-git.syncChanges', () => {
+			mirrorRepos(context);
+		})
+	);
+
+	// const disposable = vscode.commands.registerCommand('chrono-git.authenticateGitHub', () => {
+	// 	vscode.window.showInformationMessage('Hello World from Chrono Git!!');
+	// 	authenticate(context);
+	// });
+
+	// context.subscriptions.push(disposable);
+}
+
 export function deactivate() {}

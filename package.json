@@ -21,6 +21,10 @@
       {
         "command": "chrono-git.authenticateGitHub",
         "title": "Authenticate with GitHub"
+      },
+      {
+        "command": "chrono-git.syncChanges",
+        "title": "Sync Commits Now"
       }
     ]
   },
