@@ -13,11 +13,17 @@
   "activationEvents": [],
   "main": "./dist/extension.js",
   "contributes": {
+    "configuration": {
+      "title": "Chrono Git",
+      "properties": {
+        "chronoGit.syncInterval": {
+          "type": "number",
+          "default": 10800000,
+          "description": "Interval in milliseconds for batch sync (default 3 hours)"
+        }
+      }
+    },
     "commands": [
-      {
-        "command": "chrono-git.editedCommand",
-        "title": "Hello World, edited"
-      },
       {
         "command": "chrono-git.authenticateGitHub",
         "title": "Authenticate with GitHub"
@@ -25,6 +31,10 @@
       {
         "command": "chrono-git.syncChanges",
         "title": "Sync Commits Now"
+      },
+      {
+        "command": "chrono-git.selectRepos",
+        "title": "Select Repos"
       }
     ]
   },

@@ -1,13 +1,15 @@
 import * as vscode from 'vscode';
 import { authenticate, refreshAccessToken } from './authenticate';
 import { ensureMirrorRepo, mirrorRepos } from './sync';
+import { selectReposForMirroring } from './repoSelection';
 
 async function ensureValidToken(context: vscode.ExtensionContext) {
 	const token = await context.secrets.get('githubAccessToken');
 
 	if(!token) {
-		vscode.window.showErrorMessage("No Github token found. Please authenticate.");
-		return;
+		vscode.window.showErrorMessage("No Github token found. Please authenticate again.");
+		vscode.window.showInformationMessage("Authenticating...");
+		await authenticate(context);
 	}
 	const refreshedToken = await refreshAccessToken(context);
 
@@ -17,17 +19,24 @@ async function ensureValidToken(context: vscode.ExtensionContext) {
 }
 
 function scheduleBatchSync(context: vscode.ExtensionContext) {
-	const syncInterval = 3 * 60 * 60 * 1000;
+	const syncInterval = vscode.workspace.getConfiguration('chronoGit').get<number>('syncInterval', 3 * 60 * 60 * 1000);
 	setInterval(() => {
 		mirrorRepos(context);
 	}, syncInterval);
 }
 
-export function activate(context: vscode.ExtensionContext) {
+export async function activate(context: vscode.ExtensionContext) {
 
 	console.log('Congratulations, your extension "chrono-git" is now active!');
-	
-	ensureValidToken(context);
+
+	const token = await context.secrets.get("githubAccessToken");
+	if(!token) {
+		vscode.window.showErrorMessage("No access token found. Please authenticate.");
+		vscode.window.showInformationMessage("Authenticating...");
+		await authenticate(context);
+	}
+
+	await ensureValidToken(context);
 	context.subscriptions.push(
 		vscode.commands.registerCommand('chrono-git.authenticate', () => {
 			authenticate(context);
@@ -39,6 +48,20 @@ export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(
 		vscode.commands.registerCommand('chrono-git.syncChanges', () => {
 			mirrorRepos(context);
+		})
+	);
+
+	context.subscriptions.push(
+		vscode.commands.registerCommand('chrono-git.selectRepos', async () => {
+			const token = (await context.secrets.get('githubAccessToken')) as string | undefined;
+			if(!token) {
+				vscode.window.showErrorMessage("No access token found. Please authenticate again.");
+				vscode.window.showInformationMessage("Authenticating...");
+				await authenticate(context);
+				return;
+			}
+
+			await selectReposForMirroring(token, context);
 		})
 	);
 
