@@ -46,8 +46,8 @@ export async function activate(context: vscode.ExtensionContext) {
 	ensureMirrorRepo(context);
 	scheduleBatchSync(context);
 	context.subscriptions.push(
-		vscode.commands.registerCommand('chrono-git.syncChanges', () => {
-			mirrorRepos(context);
+		vscode.commands.registerCommand('chrono-git.syncChanges', async () => {
+			await mirrorRepos(context);
 		})
 	);
 

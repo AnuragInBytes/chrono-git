@@ -1,8 +1,4 @@
 import * as vscode from 'vscode';
-// import { RestEndpointMethodTypes } from "@octokit/plugin-rest-endpoint-methods";
-
-// let Repo: any;
-// type RepoQuickPick = vscode.QuickPickItem & { repoFullName: string };
 
 interface Repo {
   name: string;
@@ -12,11 +8,11 @@ interface Repo {
 
 type RepoQuickPickItem = vscode.QuickPickItem & { repoFullName: string };
 
-//Dynamiclly import octokit
-async function getOctokit(token: string) {
+export async function getOctokit(token: string) {
 
   const { Octokit } = await import("octokit");
   // const { RestEndpointMethodTypes } = await import("@octokit/plugin-rest-endpoint-methods");
+
   return new Octokit({ auth: token });
 }
 
