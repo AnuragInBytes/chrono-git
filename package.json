@@ -23,7 +23,7 @@
         },
         "chronoGit.mirrorRepoOwner": {
           "type": "string",
-          "default": "anuraginbytes",
+          "default": "",
           "description": "Github username or organisation for the mirror repository"
         },
         "chronoGit.mirrorRepo": {
@@ -36,15 +36,15 @@
     "commands": [
       {
         "command": "chrono-git.authenticateGitHub",
-        "title": "Authenticate with GitHub"
+        "title": "Chrono Git: Authenticate with GitHub"
       },
       {
         "command": "chrono-git.syncChanges",
-        "title": "Sync Commits Now"
+        "title": "Chrono Git: Sync Now"
       },
       {
         "command": "chrono-git.selectRepos",
-        "title": "Select Repos"
+        "title": "Chrono Git: Select Repositories for Mirroring"
       }
     ]
   },
