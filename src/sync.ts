@@ -23,6 +23,20 @@ export async function ensureMirrorRepo(context: vscode.ExtensionContext) {
   }
 
   const octokit = new Octokit({ auth: token });
+  const mirrorRepoOwner = vscode.workspace.getConfiguration('chronoGit').get<string>('mirrorRepoOwner');
+
+  if(!mirrorRepoOwner) {
+    try {
+      const { data: user } = await octokit.request('GET /user');
+      const config = vscode.workspace.getConfiguration('chronoGit');
+      await config.update('mirrorRepoOwner', user.login, vscode.ConfigurationTarget.Global);
+      vscode.window.showInformationMessage(`Mirror repository owner set to ${user.login}`);
+    } catch (error) {
+      vscode.window.showErrorMessage("Failed to fetch user information. Please configure mirrorRepoOwner manually.");
+      console.error(error);
+    }
+  }
+
 
   const mirrorRepoName = 'commit-mirror';
   const user = await octokit.request('GET /user');
@@ -60,32 +74,62 @@ async function fetchLatestCommit(octokit: any, repoFullName: string): Promise<co
   }
 }
 
+function parseRepoFullName(repoFullName: string): { repoOwner: string, repoName: string } {
+  const [repoOwner, repoName] = repoFullName.split('/');
+  if(!repoOwner || !repoName) {
+    throw new Error(`Invalid repository name: ${repoFullName}`);
+  }
+  return { repoName, repoOwner };
+}
+
 //push commit mata data to mirror repo
 async function mirrorCommitToRepo(octokit: any, commit: commitData, mirrorRepoName: string) {
   // const content = `Commit: ${commit.commit.message}\nDate: ${commit.commit.author.date}\nRepo: ${commit.html_url}`;
   // const path = `${commit.sha}}.txt`;
+  const { repoName, repoOwner } = parseRepoFullName(mirrorRepoName);
   const content = `# Mirrored Commit\n\nCommit: ${commit.sha}\nMessage: ${commit.commit.message}`;
   const path = `commits/${commit.sha}.md`;
 
   try {
+    let sha: string | undefined;
+    try {
+      const fileResponse = await octokit.rest.repos.getContent({
+        owner: repoOwner,
+        repo: repoName,
+        path
+      });
+
+      if(Array.isArray(fileResponse.data)) {
+        throw new Error('Unexpected response: file path is directory.');
+      }
+
+      sha = fileResponse.data.sha;
+    } catch (error: any) {
+      if(error.status !== 404) {
+        throw error;
+      }
+      sha = undefined;
+    }
+
     await octokit.rest.repos.createOrUpdateFileContents({
-      owner: vscode.workspace.getConfiguration('chronoGit').get('mirrorRepoOwner'),
-      repo: mirrorRepoName,
+      owner: repoOwner,
+      repo: repoName,
       path,
       message: `Mirror commit - ${commit.sha}`,
       content: Buffer.from(content).toString('base64'),
-      commiter: {
+      committer: {
         name: 'ChronoGit',
         email: 'chronogit@mirror.com'
       },
       author: {
         name: 'ChronoGit',
         email: 'chronogit@mirror.com'
-      }
+      },
+      sha,
     });
     vscode.window.showInformationMessage(`Commit ${commit.sha} mirrored successfully.`);
-  } catch (error) {
-    vscode.window.showErrorMessage(`Failed to mirror commits ${commit.sha}`);
+  } catch (error: any) {
+    vscode.window.showErrorMessage(`Failed to mirror commits ${commit.sha}: ${error.message}`);
     console.error("Error mirroring commits: ", error);
   }
 }

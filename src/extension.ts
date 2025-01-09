@@ -4,6 +4,9 @@ import { ensureMirrorRepo, mirrorRepos } from './sync';
 import { selectReposForMirroring } from './repoSelection';
 
 async function ensureValidToken(context: vscode.ExtensionContext) {
+
+	const { Octokit } = await import("octokit");
+
 	const token = await context.secrets.get('githubAccessToken');
 
 	if(!token) {
@@ -11,10 +14,26 @@ async function ensureValidToken(context: vscode.ExtensionContext) {
 		vscode.window.showInformationMessage("Authenticating...");
 		await authenticate(context);
 	}
+
 	const refreshedToken = await refreshAccessToken(context);
 
 	if(refreshedToken) {
 		console.log("Access token refreshed.");
+	}
+
+	const mirrorRepoOwner = vscode.workspace.getConfiguration('chronoGit').get<string>('mirrorRepoOwner');
+	const octokit = new Octokit({ auth: token });
+
+	if(!mirrorRepoOwner) {
+		try {
+			const { data: user } = await octokit.request("GET /user");
+			const config = vscode.workspace.getConfiguration('chronoGit');
+			await config.update('mirrorRepoOwner', user.login, vscode.ConfigurationTarget.Global);
+			vscode.window.showInformationMessage(`Mirror Repository owner set to ${user.login}`);
+		} catch (error) {
+			vscode.window.showErrorMessage('Failed to fetch user information. Please configure mirrorRepoOwner manually.');
+			console.error(error);
+		}
 	}
 }
 
@@ -38,7 +57,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
 	await ensureValidToken(context);
 	context.subscriptions.push(
-		vscode.commands.registerCommand('chrono-git.authenticate', () => {
+		vscode.commands.registerCommand('chrono-git.authenticateGitHub', () => {
 			authenticate(context);
 		})
 	);
