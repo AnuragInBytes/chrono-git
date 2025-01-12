@@ -1,62 +1,104 @@
 import * as vscode from 'vscode';
+import { TypeOf, z } from 'zod';
+import { GitHubRepoSchema } from './types/schema';
 
-interface Repo {
-  name: string;
-  full_name: string;
-  private: boolean;
-}
+const RepoQuickPickItemSchema = z.object({
+  label: z.string(),
+  description: z.string(),
+  repoFullName: z.string(),
+});
 
-type RepoQuickPickItem = vscode.QuickPickItem & { repoFullName: string };
+type RepoQuickPickItem = z.infer<typeof RepoQuickPickItemSchema>;
+
+const PAGE_SIZE = 100;
+const MAX_PAGE = 10;
+
 
 export async function getOctokit(token: string) {
 
-  const { Octokit } = await import("octokit");
-  // const { RestEndpointMethodTypes } = await import("@octokit/plugin-rest-endpoint-methods");
-
-  return new Octokit({ auth: token });
+  try {
+    const { Octokit } = await import("octokit");
+    return new Octokit({ auth: token });
+  } catch (error) {
+    throw new Error(`Failed to initialize Octokit: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
 }
 
-async function fetchUserRepo(octokit: any): Promise<RepoQuickPickItem[]> {
+async function fetchUserRepo(octokit: any, page: number = 1): Promise<RepoQuickPickItem[]> {
   try {
-    const repos = await octokit.request('GET /user/repos', {
-      per_page: 100
+    const response = await octokit.request('GET /user/repos', {
+      per_page: PAGE_SIZE,
+      page,
     });
 
-    return repos.data.map((repo: any) => ({
+    const repos = z.array(GitHubRepoSchema).parse(response.data);
+
+    return repos.map((repo) => ({
       label: repo.name,
       description: repo.private ? 'Private' : 'Public',
       repoFullName: repo.full_name,
     }));
-
   } catch (error) {
-    vscode.window.showErrorMessage("Failed to fetch repositories. Please check your connection or token.");
-    console.error("Error fetching repos: ", error);
-    return [];
+    throw new Error(`Failed to fetch repositories: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
+}
+
+async function fetchAllUserRepos(octokit: any): Promise<RepoQuickPickItem[]> {
+  const allRepos: RepoQuickPickItem[] = [];
+  let page = 1;
+
+  try {
+    while(page < MAX_PAGE) {
+      const repos = await fetchUserRepo(octokit, page);
+      if(repos.length===0){
+        break;
+      }
+
+      allRepos.push(...repos);
+      if (repos.length < PAGE_SIZE){
+        break;
+      }
+      page++;
+    }
+    return allRepos;
+  } catch (error) {
+    throw new Error(`Failed to fetch all repositories: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
 }
 
 async function selectReposForMirroring(token: string, context: vscode.ExtensionContext) {
-  const octokit = await getOctokit(token);
-  const repos = await fetchUserRepo(octokit);
 
-  if(repos.length === 0) {
-    vscode.window.showInformationMessage("No repositories to mirror commits from.");
-    return;
-  }
+  try {
+    const octokit = await getOctokit(token);
+    const repos = await fetchUserRepo(octokit);
 
-  const selected = await vscode.window.showQuickPick(repos, {
-    canPickMany: true,
-    placeHolder: 'Select repositories to mirror commits from'
-  });
+    if(repos.length === 0) {
+      vscode.window.showInformationMessage("No repositories to mirror commits from.");
+      return;
+    }
 
-  if(selected) {
-    const repoName = selected.map((repo) => (repo as RepoQuickPickItem).repoFullName);
+    const quickPick = vscode.window.createQuickPick<RepoQuickPickItem>();
+    quickPick.items = repos;
+    quickPick.canSelectMany = true;
+    quickPick.placeholder = 'Select repositories to mirror commits from';
 
-    await context.globalState.update('selectedRepo', repoName);
-    vscode.window.showInformationMessage(`Selected ${repoName.length} repositories for mirroring.`);
+    const selected = await new Promise<readonly RepoQuickPickItem[]>((resolve) => {
+      quickPick.onDidAccept(() => {
+        resolve(quickPick.selectedItems);
+        quickPick.dispose();
+      });
+      quickPick.show();
+    });
 
-  } else {
-    vscode.window.showInformationMessage('No repositories selected.');
+    if(selected && selected.length > 0) {
+      const repoName = [...selected].map(repo => repo.repoFullName);
+      await context.globalState.update('selectedRepos', repoName);
+      vscode.window.showInformationMessage(`Selected ${selected.length} repositories for mirroring.`);
+    } else {
+      vscode.window.showInformationMessage('No Repositories selected.');
+    }
+  } catch (error) {
+    vscode.window.showErrorMessage(`Failed to select repositories: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
 }
 

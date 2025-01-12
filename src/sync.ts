@@ -1,15 +1,64 @@
 import * as vscode from 'vscode';
 import { getOctokit } from './repoSelection';
+import { z } from 'zod';
+import { GitHubCommitSchema } from './types/schema';
+import { resolve } from 'path';
 
-interface commitData {
-  sha: string;
-  commit: {
-    message: string;
-    author: {
-      date: string;
-    };
-  };
-  html_url: string;
+const BATCH_SIZE = 5;
+const MAX_RETRIES = 3;
+const RETRY_DELAY = 1000;
+
+class RateLimiter {
+  private queue: Array<() => Promise<void>> = [];
+  private processing = false;
+  private lastRequest = 0;
+  private minDelay = 1000;
+
+  async add(fn: () => Promise<void>) {
+    this.queue.push(fn);
+    if (!this.processing) {
+      this.processing = true;
+      await this.processQueue();
+    }
+  }
+
+  private async processQueue() {
+    while(this.queue.length > 0) {
+      const now = Date.now();
+      const elapsed = now - this.lastRequest;
+      if(elapsed < this.minDelay) {
+        await new Promise(resolve => setTimeout(resolve, this.minDelay - elapsed));
+      };
+
+      const fn =  this.queue.shift();
+      if (fn) {
+        this.lastRequest = Date.now();
+        await fn();
+      }
+    }
+    this.processing = false;
+  }
+}
+
+const rateLimiter = new RateLimiter();
+
+
+async function withRetry<T>(operation: () => Promise<T>): Promise<T> {
+  let lastError: Error | undefined;
+
+  for(let i = 0; i < MAX_RETRIES; i++) {
+    try{
+      return await operation();
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      if(err instanceof Error && err.message.includes('rate limit')) {
+        await new Promise(resolve => setTimeout(resolve, 60000));
+      } else {
+        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * (i + 1)));
+      }
+    }
+  }
+  throw lastError || new Error('Operation failed after retries');
 }
 
 export async function ensureMirrorRepo(context: vscode.ExtensionContext) {
@@ -18,181 +67,182 @@ export async function ensureMirrorRepo(context: vscode.ExtensionContext) {
 
   const token = await context.secrets.get("githubAccessToken");
   if(!token) {
-    vscode.window.showErrorMessage("No tokens found. Please authenticate.");
-    return;
+    throw new Error('No token found. Please authenticate.');
   }
 
   const octokit = new Octokit({ auth: token });
-  const mirrorRepoOwner = vscode.workspace.getConfiguration('chronoGit').get<string>('mirrorRepoOwner');
+  const config = vscode.workspace.getConfiguration('chronoGit');
+  const mirrorRepoOwner = config.get<string>('mirrorRepoOwner');
 
   if(!mirrorRepoOwner) {
     try {
       const { data: user } = await octokit.request('GET /user');
-      const config = vscode.workspace.getConfiguration('chronoGit');
       await config.update('mirrorRepoOwner', user.login, vscode.ConfigurationTarget.Global);
       vscode.window.showInformationMessage(`Mirror repository owner set to ${user.login}`);
     } catch (error) {
-      vscode.window.showErrorMessage("Failed to fetch user information. Please configure mirrorRepoOwner manually.");
-      console.error(error);
+      throw new Error(`Failed to fetch user information: --`);
     }
   }
 
-
-  const mirrorRepoName = 'commit-mirror';
-  const user = await octokit.request('GET /user');
-
-  try {
-    await octokit.request('GET /repos/{owner}/{repo}', {
-      owner: user.data.login,
-      repo: mirrorRepoName,
-    });
-    console.log("Mirror repo exists.");
-  } catch (error) {
-    await octokit.request('POST /user/repos', {
-      name: mirrorRepoName,
-      private: false,
-      description: 'Mirror repo for tracking contribution',
-    });
-    vscode.window.showInformationMessage('Mirror repo created!');
+  if(!mirrorRepoOwner) {
+    throw new Error("Failed to determine mirror repository owner.");
   }
 
+  const mirrorRepoName = 'commit-mirror';
+  // const user = await octokit.request('GET /user');
+
+  try {
+    await withRetry(async () => {
+      try {
+        await octokit.request('GET /repos/{owner}/{repo}', {
+          owner: mirrorRepoOwner!,
+          repo: mirrorRepoName,
+        });
+        console.log("Mirror repo exist.");
+      } catch (error) {
+        if(error) {
+          if(error instanceof Error && error.message.includes('Not Found')) {
+            await octokit.request('POST /user/repos', {
+              name: mirrorRepoName,
+              private: false,
+              description: 'Mirror repo for tracking contribution',
+              auto_init: true
+            });
+            vscode.window.showInformationMessage('Mirror repo created!');
+          } else {
+            throw error;
+          }
+        }
+      }
+    });
+  } catch (error) {
+    throw new Error(`Failed to ensure mirror repo: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
 }
 
 // Fetch latest commits from a repo
-async function fetchLatestCommit(octokit: any, repoFullName: string): Promise<commitData[]> {
-  try {
-    const response = await octokit.rest.repos.listCommits({
-      owner: repoFullName.split('/')[0],
-      repo: repoFullName.split('/')[1],
-      per_page: 10
-    });
-    return response.data;
-  } catch (error) {
-    vscode.window.showErrorMessage(`Failed to fetch commits from ${repoFullName}`);
-    console.error("Error fetching commits: ", error);
-    return [];
-  }
-}
-
-function parseRepoFullName(repoFullName: string): { repoOwner: string, repoName: string } {
-  const [repoOwner, repoName] = repoFullName.split('/');
-  if(!repoOwner || !repoName) {
-    throw new Error(`Invalid repository name: ${repoFullName}`);
-  }
-  return { repoName, repoOwner };
-}
-
-//push commit mata data to mirror repo
-async function mirrorCommitToRepo(octokit: any, commit: commitData, mirrorRepoName: string) {
-  // const content = `Commit: ${commit.commit.message}\nDate: ${commit.commit.author.date}\nRepo: ${commit.html_url}`;
-  // const path = `${commit.sha}}.txt`;
-  const { repoName, repoOwner } = parseRepoFullName(mirrorRepoName);
-  const content = `# Mirrored Commit\n\nCommit: ${commit.sha}\nMessage: ${commit.commit.message}`;
-  const path = `commits/${commit.sha}.md`;
-
-  try {
-    let sha: string | undefined;
+async function fetchLatestCommit(octokit: any, repoFullName: string): Promise<z.infer<typeof GitHubCommitSchema>[]> {
+  return withRetry(async () => {
     try {
-      const fileResponse = await octokit.rest.repos.getContent({
-        owner: repoOwner,
-        repo: repoName,
-        path
+      const [owner, repo] = repoFullName.split('/');
+      const response = await octokit.rest.repos.listCommits({
+        owner,
+        repo,
+        per_page: 10,
       });
 
-      if(Array.isArray(fileResponse.data)) {
-        throw new Error('Unexpected response: file path is directory.');
-      }
-
-      sha = fileResponse.data.sha;
-    } catch (error: any) {
-      if(error.status !== 404) {
-        throw error;
-      }
-      sha = undefined;
+      return z.array(GitHubCommitSchema).parse(response.data);
+    } catch (error) {
+      throw new Error(`Failed to fetch commits from ${repoFullName}: ${error instanceof Error ? error.message : 'Unknown Error'}`);
     }
+  });
+}
 
-    await octokit.rest.repos.createOrUpdateFileContents({
-      owner: repoOwner,
-      repo: repoName,
-      path,
-      message: `Mirror commit - ${commit.sha}`,
-      content: Buffer.from(content).toString('base64'),
-      committer: {
-        name: 'ChronoGit',
-        email: 'chronogit@mirror.com'
-      },
-      author: {
-        name: 'ChronoGit',
-        email: 'chronogit@mirror.com'
-      },
-      sha,
+
+//push commit mata data to mirror repo
+async function mirrorCommitToRepo(
+  octokit: any,
+  commit: z.infer<typeof GitHubCommitSchema>,
+  mirrorRepoName: string,
+  mirrorRepoOwner: string,
+) {
+
+  return rateLimiter.add(async () => {
+    const content = `# Mirrored Commit\n\nCommit: ${commit.sha}\nMessage: ${commit.commit.message}\nDate: ${commit.commit.author.date}\nURL: ${commit.html_url}`;
+    const path = `commits/${commit.sha}.md`;
+
+    await withRetry(async () => {
+      try {
+        let sha: string | undefined;
+        try {
+          const fileResponse = await octokit.rest.repos.getContent({
+            owner: mirrorRepoOwner,
+            repo: mirrorRepoName,
+            path,
+          });
+
+          if('sha' in fileResponse.data) {
+            sha = fileResponse.data.sha;
+          }
+        } catch (error) {
+          if(!(error instanceof Error && error.message.includes('Not Found'))) {
+            throw error;
+          }
+        }
+
+        await octokit.rest.repos.createOrUpdateFileContents({
+          owner: mirrorRepoOwner,
+          repo: mirrorRepoName,
+          path,
+          message: `Mirror commit - ${commit.sha}`,
+          content: Buffer.from(content).toString('base64'),
+          committer: {
+            name: 'chronoGit',
+            email: 'chronogit@mirror.com'
+          },
+          author: {
+            name: 'chronoGit',
+            email: 'chronogit@mirror.com'
+          },
+          sha,
+        });
+      } catch (error) {
+        throw new Error(`Failed to mirror commit ${commit.sha}: ${error instanceof Error ? error.message : 'Unknown Error'}`);
+      }
     });
-    vscode.window.showInformationMessage(`Commit ${commit.sha} mirrored successfully.`);
-  } catch (error: any) {
-    vscode.window.showErrorMessage(`Failed to mirror commits ${commit.sha}: ${error.message}`);
-    console.error("Error mirroring commits: ", error);
-  }
+  });
 }
 
 export async function mirrorRepos(context: vscode.ExtensionContext) {
 
   const token = await context.secrets.get('githubAccessToken');
   if(!token) {
-    vscode.window.showErrorMessage("No token found. Please authenticate.");
-    return;
+    throw new Error("No token found. Please authenticate.");
   }
 
   const octokit = await getOctokit(token);
   const selectedRepos = context.globalState.get<string[]>('selectedRepo') || [];
-  const mirrorRepoName = vscode.workspace.getConfiguration('chronoGit').get<string>('mirrorRepo');
+  const config = vscode.workspace.getConfiguration('chronoGit');
+  const mirrorRepoName = config.get<string>('mirrorRepo') || 'commit-mirror';
+  const mirrorRepoOwner = config.get<string>('mirrorRepoOwner');
 
-  if(!mirrorRepoName) {
-    vscode.window.showErrorMessage("Mirror repo not configured. Please setup in settings.");
-    return;
+  if(!mirrorRepoOwner) {
+    throw new Error("Mirror repo owner not configured. Please setup in settings.");
   }
 
-  for(const repo of selectedRepos) {
-    const commits = await fetchLatestCommit(octokit, repo);
+  let totalProcessed = 0;
+  let failure = 0;
 
-    for(const commit of commits) {
-
-      try {
-        await mirrorCommitToRepo(octokit, commit, mirrorRepoName);
-      } catch (error: any) {
-        if(error.status === 404) {
-          vscode.window.showWarningMessage(`File not found in ${mirrorRepoName}. Creating new file.`);
-
-          const content = `# Mirrored Commit\n\nCommit: ${commit.sha}\nMessage: ${commit.commit.message}`;
-          const path = `commits/${commit.sha}.md`;
-
-          try {
-            await octokit.rest.repos.createOrUpdateFileContents({
-              owner: vscode.workspace.getConfiguration('chronoGit').get<string>('mirrorRepoOwner') || '',
-              repo: mirrorRepoName,
-              path: path,
-              message: `Mirror commit ${commit.sha}`,
-              content: Buffer.from(content).toString('base64'),
-              committer: {
-                name: 'Chrono Git',
-                email: 'chrono-git@gmail.com'
-              },
-              author: {
-                name: 'Chrono Git',
-                email: 'chrono-git@gmail.com'
-              }
-            });
-
-            vscode.window.showInformationMessage(`Creating commit file for ${commit.sha} in ${mirrorRepoName}`);
-          } catch (createError) {
-            vscode.window.showErrorMessage(`Failed to create file for ${mirrorRepoName}: ${createError}`);
+  try {
+    for(let i = 0; i < selectedRepos.length ; i += BATCH_SIZE) {
+      const batch = selectedRepos.slice(i, i + BATCH_SIZE);
+      await Promise.all(batch.map(async (repo) => {
+        try {
+          const commits = await fetchLatestCommit(octokit, repo);
+          for(const commit of commits){
+            try {
+              await mirrorCommitToRepo(octokit, commit, mirrorRepoName, mirrorRepoOwner);
+              totalProcessed++;
+            } catch (error) {
+              failure++;
+              console.error(`Failed to mirror commit: ${error instanceof Error ? error.message : 'Unknown Error'}`);
+            }
           }
-        } else {
-          vscode.window.showErrorMessage(`Error mirroring commits: ${error}`);
+        } catch (error) {
+          failure++;
+          console.error(`Failed to process repo ${repo}: ${error instanceof Error ? error.message : 'Unknown Error'}`);
         }
-      }
+      }));
     }
-  }
 
-  vscode.window.showInformationMessage('Commit mirroring completed.');
+    const message = `Commit mirroring completed. Processed: ${totalProcessed} commits${failure > 0 ? `, Failed: ${failure}` : ''}`;
+    if(failure > 0) {
+      vscode.window.showWarningMessage(message);
+    } else {
+      vscode.window.showInformationMessage(message);
+    }
+  } catch (error) {
+    throw new Error(`Mirror operation failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
 
 }
