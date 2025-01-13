@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { TypeOf, z } from 'zod';
+import { z } from 'zod';
 import { GitHubRepoSchema } from './types/schema';
 
 const RepoQuickPickItemSchema = z.object({
@@ -32,8 +32,20 @@ async function fetchUserRepo(octokit: any, page: number = 1): Promise<RepoQuickP
     });
 
     const repos = z.array(GitHubRepoSchema).parse(response.data);
+    const mirrorRepoFullName = vscode.workspace.getConfiguration('chronoGit').get<string>('mirrorRepo');
 
-    return repos.map((repo) => ({
+    return repos
+      .filter((repo) => {
+        if(!mirrorRepoFullName) {
+          // console.log("yaha hai be chutiye");
+          return true;
+        }
+        const normalizedMirrorName = mirrorRepoFullName.toLowerCase();
+        const normalizedRepoName = repo.name.toLowerCase();
+        // console.log([normalizedMirrorName, normalizedRepoName]);
+        return normalizedRepoName !== normalizedMirrorName;
+      })
+      .map((repo) => ({
       label: repo.name,
       description: repo.private ? 'Private' : 'Public',
       repoFullName: repo.full_name,
@@ -70,7 +82,7 @@ async function selectReposForMirroring(token: string, context: vscode.ExtensionC
 
   try {
     const octokit = await getOctokit(token);
-    const repos = await fetchUserRepo(octokit);
+    const repos = await fetchAllUserRepos(octokit);
 
     if(repos.length === 0) {
       vscode.window.showInformationMessage("No repositories to mirror commits from.");
