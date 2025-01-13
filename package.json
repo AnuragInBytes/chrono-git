@@ -1,6 +1,10 @@
 {
   "name": "chrono-git",
   "displayName": "Chrono Git",
+  "publisher": "anurox",
+  "repository": {
+    "url": "https://github.com/anuraginbytes/chrono-git"
+  },
   "description": "",
   "version": "0.0.1",
   "type": "commonjs",
@@ -12,6 +16,7 @@
   ],
   "activationEvents": [],
   "main": "./dist/extension.js",
+  "icon": "chrono-git-logo.png",
   "contributes": {
     "configuration": {
       "title": "Chrono Git",
@@ -30,6 +35,15 @@
           "type": "string",
           "default": "commit-mirror",
           "description": "Name of the github repo to store mirrored commits"
+        }
+      }
+    },
+    "icons": {
+      "my-icon-id": {
+        "description": "my icon",
+        "default": {
+          "fontPath": "chrono-git-logo.svg",
+          "fontCharacter": "\\E001"
         }
       }
     },
