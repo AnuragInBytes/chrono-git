@@ -56,7 +56,7 @@ async function ensureValidToken(context: vscode.ExtensionContext) {
 				const { data: user } = await octokit.request("GET /user");
 				await vscode.workspace.getConfiguration("chronoGit").update(
 					'mirrorRepoOwner',
-					user.login,
+					user.login.toLowerCase(),
 					vscode.ConfigurationTarget.Global
 				);
 				vscode.window.showInformationMessage(`Mirror Repository owner set to ${user.login}`);
@@ -118,13 +118,13 @@ export async function activate(context: vscode.ExtensionContext) {
 						return;
 					}
 					await selectReposForMirroring(token, context);
+					await ensureMirrorRepo(context);
 				} catch (error) {
 					vscode.window.showErrorMessage(`Failed to select repos: ${error instanceof Error ? error.message : 'Unknown error'}`);
 				}
 			})
 		);
 
-		await ensureMirrorRepo(context);
 		scheduleBatchSync(context);
 
 	} catch (error) {

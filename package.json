@@ -3,18 +3,25 @@
   "displayName": "Chrono Git",
   "publisher": "anurox",
   "repository": {
+    "type": "GitHub",
     "url": "https://github.com/anuraginbytes/chrono-git"
   },
-  "description": "",
+  "description": "Make them watch your grind",
   "version": "1.0.0",
   "type": "commonjs",
+  "license": "MIT",
   "engines": {
     "vscode": "^1.96.0"
   },
   "categories": [
     "Other"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onStartupFinished",
+    "onCommand:authenticateGitHub",
+    "onCommand:selectRepos",
+    "onCommand:syncChanges"
+  ],
   "main": "./dist/extension.js",
   "icon": "chrono-git-logo.png",
   "contributes": {
@@ -23,7 +30,7 @@
       "properties": {
         "chronoGit.syncInterval": {
           "type": "number",
-          "default": 10800000,
+          "default": 3000,
           "description": "Interval in milliseconds for batch sync (default 3 hours)"
         },
         "chronoGit.mirrorRepoOwner": {

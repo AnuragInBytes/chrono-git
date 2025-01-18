@@ -81,16 +81,10 @@ export async function authenticate(context: vscode.ExtensionContext) {
 
                     if(!tokenResponse.ok) {
                         console.error("Token repose not ok : ", await tokenResponse.text());
-                        // console.log(await tokenResponse.json());
                         throw new Error(`Token request failed: ${tokenResponse.statusText}`);
                     }
 
                     const rawData = await tokenResponse.json();
-                    // console.log('Raw token response: ', JSON.stringify(rawData, null, 2));
-
-                    // if(rawData.error) {
-                    //     throw new
-                    // }
                     const result = OAuthTokenSchema.safeParse(rawData);
 
 
@@ -114,6 +108,7 @@ export async function authenticate(context: vscode.ExtensionContext) {
 
                     res.send('Authentication successful! You can close this tab.');
                     vscode.window.showInformationMessage('Successfully authenticated with GitHub.');
+                    makeAuthenticationRequest(context);
 
                     cleanup();
                 } catch (err) {
@@ -209,6 +204,12 @@ async function makeAuthenticationRequest(context: vscode.ExtensionContext) {
     try {
     const user = await octokit.rest.users.getAuthenticated();
     vscode.window.showInformationMessage(`Hello, ${user.data.login}!`);
+    await vscode.workspace.getConfiguration("chronoGit").update(
+        'mirrorRepoOwner',
+        user.data.login.toLowerCase(),
+        vscode.ConfigurationTarget.Global
+    );
+    console.log("username updated in package.json");
 
     } catch (error: any) {
         if(error.status === 401) {

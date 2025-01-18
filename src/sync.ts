@@ -77,7 +77,7 @@ export async function ensureMirrorRepo(context: vscode.ExtensionContext) {
   if(!mirrorRepoOwner) {
     try {
       const { data: user } = await octokit.request('GET /user');
-      await config.update('mirrorRepoOwner', user.login, vscode.ConfigurationTarget.Global);
+      await config.update('mirrorRepoOwner', user.login.toLowerCase(), vscode.ConfigurationTarget.Global);
       vscode.window.showInformationMessage(`Mirror repository owner set to ${user.login}`);
     } catch (error) {
       throw new Error(`Failed to fetch user information: --`);
@@ -88,7 +88,18 @@ export async function ensureMirrorRepo(context: vscode.ExtensionContext) {
     throw new Error("Failed to determine mirror repository owner.");
   }
 
-  const mirrorRepoName = 'commit-mirror';
+  let mirrorRepoName = await vscode.window.showInputBox({
+    prompt: 'Enter the name of the mirror repository.',
+    placeHolder: 'e.g., my-mirror-repo',
+  });
+  if(mirrorRepoName) {
+    config.update('mirrorRepo', mirrorRepoName, vscode.ConfigurationTarget.Global);
+    vscode.window.showInformationMessage(`Mirror repositories set to ${mirrorRepoName}`);
+  } else{
+    mirrorRepoName = 'commit-mirror';
+    config.update('mirrorRepo', mirrorRepoName, vscode.ConfigurationTarget.Global);
+    vscode.window.showInformationMessage(`Mirror repository set to ${mirrorRepoName}`);
+  }
   // const user = await octokit.request('GET /user');
 
   try {
