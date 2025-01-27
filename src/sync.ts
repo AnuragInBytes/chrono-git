@@ -212,7 +212,7 @@ export async function mirrorRepos(context: vscode.ExtensionContext) {
   }
 
   const octokit = await getOctokit(token);
-  const selectedRepos = context.globalState.get<string[]>('selectedRepo') || [];
+  const selectedRepos = context.globalState.get<string[]>('selectedRepos') || [];
   const config = vscode.workspace.getConfiguration('chronoGit');
   const mirrorRepoName = config.get<string>('mirrorRepo') || 'commit-mirror';
   const mirrorRepoOwner = config.get<string>('mirrorRepoOwner');
@@ -224,6 +224,10 @@ export async function mirrorRepos(context: vscode.ExtensionContext) {
   let totalProcessed = 0;
   let failure = 0;
 
+  if(selectedRepos.length === 0) {
+    console.log("NO repositoies selected for mirroring.");
+  }
+
   try {
     for(let i = 0; i < selectedRepos.length ; i += BATCH_SIZE) {
       const batch = selectedRepos.slice(i, i + BATCH_SIZE);
@@ -232,6 +236,7 @@ export async function mirrorRepos(context: vscode.ExtensionContext) {
           const commits = await fetchLatestCommit(octokit, repo);
           for(const commit of commits){
             try {
+              console.log("Processing commit: ", commit.sha);
               await mirrorCommitToRepo(octokit, commit, mirrorRepoName, mirrorRepoOwner);
               totalProcessed++;
             } catch (error) {
