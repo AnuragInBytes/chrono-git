@@ -78,7 +78,7 @@ async function fetchAllUserRepos(octokit: any): Promise<RepoQuickPickItem[]> {
   }
 }
 
-async function selectReposForMirroring(token: string, context: vscode.ExtensionContext) {
+async function selectReposForMirroring(token: string, context: vscode.ExtensionContext): Promise<string[]> {
 
   try {
     const octokit = await getOctokit(token);
@@ -86,7 +86,7 @@ async function selectReposForMirroring(token: string, context: vscode.ExtensionC
 
     if(repos.length === 0) {
       vscode.window.showInformationMessage("No repositories to mirror commits from.");
-      return;
+      return [];
     }
 
     const quickPick = vscode.window.createQuickPick<RepoQuickPickItem>();
@@ -106,11 +106,14 @@ async function selectReposForMirroring(token: string, context: vscode.ExtensionC
       const repoName = [...selected].map(repo => repo.repoFullName);
       await context.globalState.update('selectedRepos', repoName);
       vscode.window.showInformationMessage(`Selected ${selected.length} repositories for mirroring.`);
+      return repoName;
     } else {
       vscode.window.showInformationMessage('No Repositories selected.');
+      return [];
     }
   } catch (error) {
     vscode.window.showErrorMessage(`Failed to select repositories: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    return [];
   }
 }
 

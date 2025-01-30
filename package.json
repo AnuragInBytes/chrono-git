@@ -30,7 +30,7 @@
       "properties": {
         "chronoGit.syncInterval": {
           "type": "number",
-          "default": 3000,
+          "default": 10800000,
           "description": "Interval in milliseconds for batch sync (default 3 hours)"
         },
         "chronoGit.mirrorRepoOwner": {

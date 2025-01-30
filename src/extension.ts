@@ -86,11 +86,16 @@ function scheduleBatchSync(context: vscode.ExtensionContext) {
 	});
 }
 
+async function clearPreviousSelections(context: vscode.ExtensionContext) {
+	await context.globalState.update('selectedRepos', []);
+}
+
 export async function activate(context: vscode.ExtensionContext) {
 
 	console.log('Congratulations, your extension "chrono-git" is now active!');
 
 	try {
+		//1. Authenticate user if no token is present
 		const token = await context.secrets.get("githubAccessToken");
 		if(!token) {
 			vscode.window.showErrorMessage("No access token found. Please authenticate.");
@@ -98,7 +103,28 @@ export async function activate(context: vscode.ExtensionContext) {
 			await authenticate(context);
 		}
 		await ensureValidToken(context);
+		vscode.window.showInformationMessage("Authentication Successful.");
 
+		// 2. Select repos if none are selected
+		let selectedRepos = context.globalState.get<string[]>('selectedRepos') || [];
+		if(selectedRepos.length === 0) {
+			vscode.window.showInformationMessage("No repositories selected. Starting repo selection...");
+			const selected = await selectReposForMirroring(token as string, context);
+			selectedRepos = selected ?? [];
+
+			if(!selectedRepos || selectedRepos.length === 0) {
+				vscode.window.showWarningMessage("No Repositories selected. Skipping sync.");
+				return;
+			}
+			await ensureMirrorRepo(context);
+			vscode.window.showInformationMessage("Repositories selection and setup completed.");
+		}
+
+		// 3. Perform initial sync
+		vscode.window.showInformationMessage("Starting initial sync...");
+		await mirrorRepos(context);
+
+		// Register commands for manual execution
 		context.subscriptions.push(
 			vscode.commands.registerCommand('chrono-git.authenticateGitHub', () => authenticate(context)),
 			vscode.commands.registerCommand('chrono-git.syncChanges', async () => {
@@ -112,12 +138,10 @@ export async function activate(context: vscode.ExtensionContext) {
 				try {
 					const token = await context.secrets.get('githubAccessToken');
 					if(!token) {
-						vscode.window.showErrorMessage("No Access token found. Please Autheticate again.");
-						vscode.window.showInformationMessage("Authenticating...");
+						vscode.window.showErrorMessage("No Access token found. Re-authenticating....");
 						await authenticate(context);
-						return;
 					}
-					await selectReposForMirroring(token, context);
+					await selectReposForMirroring(token as string, context);
 					await ensureMirrorRepo(context);
 				} catch (error) {
 					vscode.window.showErrorMessage(`Failed to select repos: ${error instanceof Error ? error.message : 'Unknown error'}`);
